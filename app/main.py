@@ -116,8 +116,8 @@ def load_df_to_db(df, tbl_name:str, replace_if_exists:bool=False):
 
 if __name__ == '__main__':
     # Read CSVs
-    ath_events_df = pd.read_csv("data/athlete_events.csv")
-    country_definitions_df = pd.read_csv("data/country_definitions.csv")
+    ath_events_df = pd.read_csv("./data/athlete_events.csv")
+    country_definitions_df = pd.read_csv("./data/country_definitions.csv")
 
     # Do some cleaning
     country_definitions_df = clean_country_definitions(country_definitions_df)
