@@ -1,0 +1,1 @@
+"""Olympics ETL application package."""
