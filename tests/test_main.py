@@ -16,6 +16,7 @@ from app.main import (
     load_olympics_data,
     query_the_db,
     resolve_data_dir,
+    validate_loaded_data,
 )
 
 
@@ -168,12 +169,107 @@ class DatabaseTests(unittest.TestCase):
                     db_engine=self.engine,
                 )
                 query_the_db(table_name, db_engine=self.engine)
+                validated_table_name = validate_loaded_data(
+                    table_name,
+                    db_engine=self.engine,
+                )
 
         self.assertEqual(ATHLETE_EVENTS_TABLE, table_name)
+        self.assertEqual(ATHLETE_EVENTS_TABLE, validated_table_name)
         self.assertTrue(inspect(self.engine).has_table(ATHLETE_EVENTS_TABLE))
         self.assertTrue(inspect(self.engine).has_table(COUNTRY_DEFINITIONS_TABLE))
         self.assertEqual(2, len(pd.read_sql_table(ATHLETE_EVENTS_TABLE, self.engine)))
         self.assertEqual(1, len(pd.read_sql_table(COUNTRY_DEFINITIONS_TABLE, self.engine)))
+
+
+class ValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine("sqlite+pysqlite:///:memory:")
+
+    def tearDown(self):
+        self.engine.dispose()
+
+    @staticmethod
+    def valid_athletes() -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "noc": ["USA"],
+                "age": [25],
+                "height": [175],
+                "weight": [65],
+                "year": [2016],
+            }
+        )
+
+    @staticmethod
+    def valid_countries() -> pd.DataFrame:
+        return pd.DataFrame({"noc": ["USA"]})
+
+    def load_validation_tables(
+        self,
+        athletes: pd.DataFrame | None = None,
+        countries: pd.DataFrame | None = None,
+    ) -> None:
+        athlete_data = athletes if athletes is not None else self.valid_athletes()
+        country_data = countries if countries is not None else self.valid_countries()
+
+        athlete_data.to_sql(
+            ATHLETE_EVENTS_TABLE,
+            self.engine,
+            index=False,
+            if_exists="replace",
+        )
+        country_data.to_sql(
+            COUNTRY_DEFINITIONS_TABLE,
+            self.engine,
+            index=False,
+            if_exists="replace",
+        )
+
+    def test_validate_loaded_data_accepts_valid_tables(self):
+        self.load_validation_tables()
+
+        with redirect_stdout(io.StringIO()):
+            table_name = validate_loaded_data(db_engine=self.engine)
+
+        self.assertEqual(ATHLETE_EVENTS_TABLE, table_name)
+
+    def test_validate_loaded_data_rejects_missing_tables(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Required database tables are missing: athlete_events, country_definitions",
+        ):
+            validate_loaded_data(db_engine=self.engine)
+
+    def test_validate_loaded_data_rejects_empty_tables(self):
+        empty_athletes = pd.DataFrame(
+            columns=["noc", "age", "height", "weight", "year"]
+        )
+        empty_countries = pd.DataFrame(columns=["noc"])
+        self.load_validation_tables(empty_athletes, empty_countries)
+
+        with self.assertRaises(ValueError) as context:
+            validate_loaded_data(db_engine=self.engine)
+
+        error_message = str(context.exception)
+        self.assertIn("athlete table is empty", error_message)
+        self.assertIn("country table is empty", error_message)
+
+    def test_validate_loaded_data_rejects_unknown_noc(self):
+        athletes = self.valid_athletes()
+        athletes.loc[0, "noc"] = "XXX"
+        self.load_validation_tables(athletes=athletes)
+
+        with self.assertRaisesRegex(ValueError, "unknown NOC"):
+            validate_loaded_data(db_engine=self.engine)
+
+    def test_validate_loaded_data_rejects_invalid_numeric_values(self):
+        athletes = self.valid_athletes()
+        athletes.loc[0, "age"] = -1
+        self.load_validation_tables(athletes=athletes)
+
+        with self.assertRaisesRegex(ValueError, "invalid values"):
+            validate_loaded_data(db_engine=self.engine)
 
 
 class PathTests(unittest.TestCase):

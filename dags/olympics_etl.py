@@ -30,7 +30,16 @@ def olympics_etl():
 
         query_the_db(table_name)
 
-    query_loaded_data(load_data())
+
+    @task(task_id="validate_loaded_data")
+    def validate_data(table_name: str) -> str:
+        from app.main import validate_loaded_data
+
+        return validate_loaded_data(table_name)
+
+
+    validated_table = validate_data(load_data())
+    query_loaded_data(validated_table)
 
 
 olympics_etl_dag = olympics_etl()

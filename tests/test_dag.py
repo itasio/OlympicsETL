@@ -26,12 +26,20 @@ class DagTests(unittest.TestCase):
         self.assertIsNone(dag.schedule_interval)
         self.assertEqual(1, dag.max_active_runs)
         self.assertEqual(
-            {"load_olympics_data", "query_olympics_data"},
+            {
+                "load_olympics_data",
+                "validate_loaded_data",
+                "query_olympics_data",
+            },
             set(dag.task_ids),
         )
         self.assertEqual(
-            {"query_olympics_data"},
+            {"validate_loaded_data"},
             dag.get_task("load_olympics_data").downstream_task_ids,
+        )
+        self.assertEqual(
+            {"query_olympics_data"},
+            dag.get_task("validate_loaded_data").downstream_task_ids,
         )
 
 

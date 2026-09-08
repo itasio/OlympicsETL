@@ -180,10 +180,93 @@ def load_olympics_data(
 
     return ATHLETE_EVENTS_TABLE
 
+def validate_loaded_data(
+    athlete_table_name: str = ATHLETE_EVENTS_TABLE,
+    country_table_name: str = COUNTRY_DEFINITIONS_TABLE,
+    db_engine: Engine | None = None,
+) -> str:
+    target_engine = db_engine or get_engine()
+    inspector = inspect(target_engine)
+
+    missing_tables = [
+        table_name
+        for table_name in (athlete_table_name, country_table_name)
+        if not inspector.has_table(table_name)
+    ]
+
+    if missing_tables:
+        raise ValueError(
+            f"Required database tables are missing: {', '.join(missing_tables)}"
+        )
+
+    quote = target_engine.dialect.identifier_preparer.quote
+    athlete_table = quote(athlete_table_name)
+    country_table = quote(country_table_name)
+
+    validation_query = text(
+        f"""
+        SELECT
+            (SELECT COUNT(*) FROM {athlete_table}) AS athlete_count,
+            (SELECT COUNT(*) FROM {country_table}) AS country_count,
+            (
+                SELECT COUNT(*)
+                FROM {athlete_table} AS athlete
+                LEFT JOIN {country_table} AS country
+                    ON athlete.noc = country.noc
+                WHERE country.noc IS NULL
+            ) AS unknown_noc_count,
+            (
+                SELECT COUNT(*)
+                FROM {athlete_table}
+                WHERE age IS NULL
+                   OR height IS NULL
+                   OR weight IS NULL
+                   OR year IS NULL
+                   OR age < 0
+                   OR height < 0
+                   OR weight < 0
+                   OR year < 1896
+            ) AS invalid_value_count
+        """
+    )
+
+    with target_engine.connect() as connection:
+        result = connection.execute(validation_query).mappings().one()
+
+    validation_errors = []
+
+    if result["athlete_count"] == 0:
+        validation_errors.append("athlete table is empty")
+
+    if result["country_count"] == 0:
+        validation_errors.append("country table is empty")
+
+    if result["unknown_noc_count"] > 0:
+        validation_errors.append(
+            f"{result['unknown_noc_count']} athlete rows have an unknown NOC"
+        )
+
+    if result["invalid_value_count"] > 0:
+        validation_errors.append(
+            f"{result['invalid_value_count']} athlete rows contain invalid values"
+        )
+
+    if validation_errors:
+        raise ValueError(
+            "Loaded data validation failed: " + "; ".join(validation_errors)
+        )
+
+    print(
+        "Loaded data validation passed: "
+        f"{result['athlete_count']} athlete rows and "
+        f"{result['country_count']} country rows."
+    )
+
+    return athlete_table_name
 
 def main() -> None:
     table_name = load_olympics_data()
-    query_the_db(table_name)
+    query_the_db(validate_loaded_data(table_name))
 
 
 if __name__ == "__main__":
